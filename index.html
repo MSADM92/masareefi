@@ -70,6 +70,21 @@
     h2 { margin: 0; font-size: 18px; line-height: 1.5; }
     .panel-sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
     .heading-icon { display: grid; flex: 0 0 auto; width: 38px; height: 38px; place-items: center; border-radius: 12px; background: #f1f5f9; font-size: 18px; }
+    .sms-import { margin: -4px 0 18px; overflow: hidden; border: 1px solid #dcebe7; border-radius: 14px; background: #f8fcfa; }
+    .sms-import summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 13px 14px; color: #176b60; font-size: 13px; font-weight: 700; cursor: pointer; list-style: none; }
+    .sms-import summary::-webkit-details-marker { display: none; }
+    .sms-import summary::after { content: "＋"; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; background: #e5f3ef; }
+    .sms-import[open] summary::after { content: "−"; }
+    .sms-import-hint { margin: 0; padding: 0 14px 10px; color: #788a87; font-size: 10px; line-height: 1.7; }
+    .sms-import-body { padding: 0 14px 14px; }
+    .sms-textarea { width: 100%; min-height: 112px; resize: vertical; padding: 11px 12px; border: 1px solid #dfe8e5; border-radius: 11px; background: white; color: var(--ink); font: inherit; font-size: 12px; line-height: 1.8; }
+    .sms-textarea:focus { outline: none; border-color: #62b7a8; box-shadow: 0 0 0 3px rgba(8,127,117,.1); }
+    .sms-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+    .sms-status { display: none; margin-top: 10px; padding: 10px 12px; border: 1px solid #d7e9e2; border-radius: 10px; background: #f0faf5; color: #326a59; font-size: 11px; line-height: 1.8; }
+    .sms-status.visible { display: block; }
+    .sms-status.warning { border-color: #efdfc6; background: #fff9ef; color: #805d28; }
+    .sms-status.error { border-color: #f0d5d2; background: #fff6f5; color: #984b45; }
+    .sms-privacy { margin: 8px 0 0; color: #85928f; font-size: 10px; line-height: 1.7; }
     .field { margin-bottom: 16px; }
     .field label { display: block; margin-bottom: 7px; color: #455166; font-size: 13px; font-weight: 600; }
     .field input { width: 100%; min-height: 46px; padding: 11px 13px; border: 1px solid #e2e8ef; border-radius: 12px; background: #fbfcfd; color: var(--ink); transition: border .18s, box-shadow .18s; }
@@ -227,6 +242,16 @@
           <div><h2>أضف مصروفاً جديداً</h2><p class="panel-sub">سجّل التفاصيل ليُحدّث الدفتر تلقائياً</p></div>
           <span class="heading-icon">＋</span>
         </div>
+        <details class="sms-import" id="sms-import">
+          <summary><span>📩 استيراد عملية من رسالة البنك</span></summary>
+          <p class="sms-import-hint">انسخ رسالة الخصم من تطبيق الرسائل والصقها هنا. سنقترح المبلغ والمتجر والتاريخ والتصنيف، ثم تراجعها قبل الإضافة.</p>
+          <div class="sms-import-body">
+            <textarea class="sms-textarea" id="sms-message" dir="auto" autocomplete="off" spellcheck="false" placeholder="الصق نص الرسالة هنا…"></textarea>
+            <div class="sms-actions"><button class="btn primary" id="parse-sms" type="button">حلّل الرسالة</button><button class="btn" id="clear-sms" type="button">مسح النص</button></div>
+            <div class="sms-status" id="sms-status" role="status" aria-live="polite"></div>
+            <p class="sms-privacy">التحليل يتم داخل الصفحة على جهازك. نص الرسالة لا يُحفظ؛ عند الإضافة نحفظ فقط بيانات العملية التي راجعتها.</p>
+          </div>
+        </details>
         <form id="expense-form" novalidate>
           <div class="field">
             <label for="expense-title">اسم المصروف</label>
@@ -289,6 +314,7 @@
   <footer class="shell">بياناتك محفوظة على هذا الجهاز فقط.</footer>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="./bank-message-parser.js"></script>
   <script>
     (() => {
       const STORAGE_KEY = 'masareefi_expenses_v1';
@@ -298,6 +324,9 @@
         { name: 'الطعام', icon: '◉', color: '#f4a261' },
         { name: 'النقل', icon: '↗', color: '#7585d8' },
         { name: 'الفواتير', icon: 'ϟ', color: '#e17d78' },
+        { name: 'الالتزامات', icon: '▣', color: '#d58b48' },
+        { name: 'التحويلات', icon: '⇄', color: '#6c82bd' },
+        { name: 'السفر', icon: '✈', color: '#4d9bb1' },
         { name: 'الصحة', icon: '✚', color: '#45a5c2' },
         { name: 'التسوق', icon: '◇', color: '#bb83c7' },
         { name: 'التعليم', icon: '▤', color: '#719d64' },
@@ -503,6 +532,34 @@
       function deleteRecord(id) {
         records = records.filter(item => item.id !== id); persist(); render(); showToast('تم حذف المصروف وتحديث الإجمالي.');
       }
+      function setSmsStatus(message, tone = '') {
+        const status = el('sms-status');
+        status.textContent = message;
+        status.className = `sms-status visible${tone ? ` ${tone}` : ''}`;
+      }
+      function importBankMessage() {
+        const raw = el('sms-message').value.trim();
+        const parsed = MasareefiBankParser.parse(raw, todayISO);
+        if (!parsed.ok) { setSmsStatus(parsed.error, 'error'); return; }
+
+        const normalizedMerchant = parsed.merchant.toLocaleLowerCase('ar').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        const duplicate = records.some(item => Number(item.amount) === parsed.amount && item.dateISO === parsed.dateISO && String(item.title).toLocaleLowerCase('ar').replace(/[^\p{L}\p{N}]+/gu, ' ').trim() === normalizedMerchant);
+        el('expense-title').value = parsed.merchant;
+        el('expense-amount').value = String(parsed.amount);
+        el('expense-date').value = parsed.dateISO;
+        el('expense-note').value = parsed.typeLabel;
+        selectedCategory = categories.some(item => item.name === parsed.category) ? parsed.category : 'أخرى';
+        renderCategoryOptions();
+        el('sms-message').value = '';
+
+        const detectedDate = parsed.dateFound ? `التاريخ المستخرج ${parsed.dateISO}` : `لم يظهر تاريخ واضح؛ استخدمت تاريخ اليوم (${todayISO})`;
+        const extra = [];
+        if (!parsed.dateFound) extra.push('راجع التاريخ قبل الحفظ');
+        if (parsed.type === 'card-payment') extra.push('إذا كنت تسجل مشتريات البطاقة أيضاً، انتبه لاحتمال احتساب المبلغ مرتين');
+        if (duplicate) extra.push('وجدت عملية مشابهة مسجلة؛ تأكد قبل الإضافة');
+        setSmsStatus(`تم التعرف على ${parsed.typeLabel}: ${parsed.merchant} · ${formatMoney(parsed.amount)} ريال · ${detectedDate} · التصنيف المقترح: ${parsed.category}. راجع الحقول، ويمكنك تعديلها، ثم اضغط «إضافة إلى المصاريف».${extra.length ? ` تنبيه: ${extra.join('؛ ')}.` : ''}`, extra.length ? 'warning' : '');
+        el('expense-title').focus({ preventScroll: true });
+      }
       function addRecord(event) {
         event.preventDefault();
         const title = el('expense-title').value.trim();
@@ -523,6 +580,8 @@
       }
 
       addMonthOptions(); renderCategoryOptions(); render();
+      el('parse-sms').addEventListener('click', importBankMessage);
+      el('clear-sms').addEventListener('click', () => { el('sms-message').value = ''; el('sms-status').className = 'sms-status'; el('sms-status').textContent = ''; });
       el('expense-form').addEventListener('submit', addRecord);
       el('period-filter').addEventListener('change', render);
       el('search-input').addEventListener('input', renderRecords);
